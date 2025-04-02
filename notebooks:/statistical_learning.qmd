@@ -1,0 +1,327 @@
+---
+title: "Statistical Models Homework 1"
+date: "Submitted: 2 April 2025"
+author: "Andrea Mauro (Student ID: 254955)"
+format:
+  pdf:
+    latex-engine: xelatex
+    geometry: "left=2cm,right=2cm,top=1cm,bottom=1.5cm"
+---
+
+```{r echo=FALSE}
+knitr::opts_chunk$set(warning=FALSE,
+message=FALSE,
+tidy.opts=list(width.cutoff = 60),
+tidy = TRUE)
+```
+
+# Introduction
+
+Cardiovascular diseases are among the leading causes of morbidity and mortality worldwide. In particular, **coronary heart disease (`CHD`)** is a critical condition that can lead to severe complications such as myocardial infarction and heart failure. Identifying the risk factors associated with the development of CHD is essential for prevention and management.
+
+This study analyzes a dataset from a cardiovascular study and the following report addresses the following key objectives:
+
+1.  **Data Exploration**
+
+2.  **Dataset Splitting into Training and Test Sets**
+
+3.  **Statistical Modeling and Analysis 1 : logistic regression**
+
+4.  **Statistical Modeling and Analysis 2 : k-Nearest Neighbors**
+
+5.  **Model Performance Evaluation**
+
+6.  **Conclusions and Study Limitations**
+
+```{r echo=FALSE}
+library(patchwork)
+library(skimr)
+library(knitr)
+library(kableExtra)
+library(themis)
+library(formatR)
+library(tidymodels)
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(caret)
+library(pROC)
+```
+
+# Dataset presentation
+
+```{r echo = FALSE}
+
+data <- read.csv("/Users/andreamauro/Downloads/chd.csv")
+
+head(data)
+```
+
+# Preprocessing 
+
+Before fitting the logistic regression model, it was necessary to appropriately encode categorical variables. In particular, the variables **`sex`** and **`CHD`**, originally stored as character data, were transformed into factors. Also was importang to check if the numbers of NAs could compromise the analysis: since the numbers of NAs is negligible the choice was to delete them.
+
+```{r echo=FALSE}
+# Trasformazione della variabile 'CHD' da 'No'/'Yes' a 0/1
+data <- data %>% 
+  mutate(across(c("sex", "CHD"), as.factor))
+
+# Controlla NA nel dataset
+data <- na.omit(data)  # Elimina tutte le righe con NA
+#sum(is.na(data$CHD))  # Conta NA nella colonna CHD
+       # Mostra NA per tutte le colonne
+# Verifica il risultato
+  # Controlla i nuovi valori della variabile CHD
+str(data$sex)
+str(data$CHD)
+# Controllare l
+```
+
+#  Variables plotting
+
+```{r echo=FALSE}
+#| label: fig-eda
+#| fig-width: 14  # Aumenta la larghezza
+#| fig-height: 8  # Aumenta l'altezza
+#| fig-align: "center"
+#| out-width: "100%"  # Utilizza tutta la larghezza disponibile
+cat_vars <- c("diabetes","HTN","smoker","stroke")
+cont_vars <- c("age", "cpd", "chol", "DBP", "BMI", "HR")
+
+# 1. Grafico variabili categoriche
+cat_plot <- data %>%
+  select(CHD, all_of(cat_vars)) %>%
+  pivot_longer(cols = -CHD, names_to = "variabile", values_to = "valore") %>%
+  filter(!is.na(valore)) %>%
+  ggplot(aes(x = as.factor(valore), fill = as.factor(CHD))) +
+  geom_bar(position = "fill") +
+  facet_wrap(~ variabile, scales = "free_x") +
+  labs(title = "Categorical variables",
+       x = "Value", y = "Proportion", fill = "CHD") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(face = "bold",angle = 0, hjust = 1))
+
+# 2. Grafico variabili continue
+cont_plot <- data %>%
+  select(CHD, all_of(cont_vars)) %>%
+  pivot_longer(cols = -CHD, names_to = "variabile", values_to = "valore") %>%
+  ggplot(aes(x = as.factor(CHD), y = valore, fill = as.factor(CHD))) +
+  geom_boxplot() +
+  facet_wrap(~ variabile, scales = "free_y") +
+  labs(title = "Continous variables",
+       x = "CHD", y = "Value", fill = "CHD") +
+  theme_minimal()
+
+# 3. Combinazione con patchwork
+combined_plot <- cat_plot + cont_plot + 
+  plot_layout(ncol = 2, widths = c(1, 1.6)) +
+  plot_annotation(title = "Explorative analysis of variables",
+                 theme = theme(plot.title = element_text(face = "bold",hjust = 0.5, size = 20)))
+
+# Visualizzazione
+combined_plot
+```
+
+# Covariance matrix
+
+In evaluating the predictors of the disease, it was useful to configure a covariance matrix to determine whether some variables were collinear and if this could influence predictive models. No variable appears to be particularly correlated, except for `BMI` and `DBP`, which show a correlation coefficient that is relatively low and therefore negligible.
+
+```{r echo=FALSE}
+#pairs(data[,numeric_vars])
+```
+
+```{r echo=FALSE, fig.width=8, fig.height=3}
+# Funzione per identificare il problema
+diagnostica_correlazione <- function(df, vars) {
+  # Controlla i tipi di variabile
+  print("Tipi di variabile:")
+  print(sapply(df[, vars], class))
+  
+  # Controlla valori mancanti
+  print("\nValori mancanti:")
+  print(sapply(df[, vars], function(x) sum(is.na(x))))
+  
+  # Controlla valori unici
+  print("\nValori unici:")
+  print(sapply(df[, vars], function(x) length(unique(x))))
+  
+  # Controlla range dei valori
+  print("\nRange dei valori:")
+  print(sapply(df[, vars], function(x) {
+    if(is.numeric(x)) return(range(x, na.rm = TRUE))
+    else return("Non numerico")
+  }))
+}
+
+# Variabili da analizzare
+vars_numeriche <- c("age", "cpd", "chol", "DBP", "BMI", "HR")
+
+# Esegui diagnostica
+#diagnostica_correlazione(data, vars_numeriche)
+
+# Calcolo correlazione forzando numerico
+cor_matrix <- cor(
+  apply(data[, vars_numeriche], 2, as.numeric), 
+  use = "complete.obs"
+)
+
+# Visualizzazione
+
+library(corrplot)
+corrplot(cor_matrix, method = "color")
+
+```
+
+# Splitting dataset
+
+Prior to model development, the dataset was divided into training (80%) and testing (20%) portions.
+
+```{r}
+#set random seed
+set.seed(123)
+#trainig and testing division
+index <- createDataPartition(data$CHD, p = 0.8, list = FALSE, times = 1)
+train_df <- data[index,]
+test_df <- data[-index,]
+```
+
+# Logistic regression (model 1)
+
+Now, diving into the statistical modeling phase, the first model to be computed was a **logistic regression** using the cross validation method. The model was specified as :
+
+logit(E(CHD)) = β0 + β1sex+ β2age+ β3education+...+ β12HR
+
+```{r}
+
+#type of training and number of folds(k)
+ctrlspecs <- trainControl(method = "cv", number = 5,
+                          savePredictions = "all",
+                          classProbs = TRUE)
+#set random seed
+set.seed(123)
+#logistic regression setting using "train" from caret package
+model1 <- train(CHD ~ sex + age + education + smoker + cpd + stroke + HTN + diabetes + chol + DBP + BMI + HR,
+                data = train_df,
+                method = "glm",
+                family = binomial,
+                trControl = ctrlspecs)
+
+#predict the outcome using model1 applied to test_df
+predictions_1 <- predict(model1,newdata = test_df)
+#creating a confusion matrix
+conf_matrix_1 <- confusionMatrix(data=predictions_1,test_df$CHD,positive = "Yes")
+conf_matrix_1
+```
+
+As we can notice, this first model is quite accurate, but it lacks in predicting the positive cases in the right way.
+
+# Resampling (model 2)
+
+In this model, the class imbalance was adjusted through oversampling of the positive class (`CHD`="Yes"). This approach was necessary as the initial model, despite high overall accuracy, struggled to correctly identify true positive cases of coronary heart disease.The `education` variable was excluded from the final model as it demonstrated negligible predictive contribution (importance ≈ 0 in preliminary variable analysis)
+
+```{r}
+# Oversampling for the class "Yes" using "up"
+ctrlspecs <- trainControl(
+  method = "cv", 
+  number = 5,
+  savePredictions = "all",
+  classProbs = TRUE,
+  sampling = "up", 
+  summaryFunction = twoClassSummary, 
+  verboseIter = FALSE 
+)
+# Set random seed
+set.seed(123)
+# Oversampling logistic model
+model2 <- train(
+  CHD ~ sex + age + smoker + cpd + stroke + HTN + diabetes + chol + DBP + BMI + HR,
+  data = train_df,
+  method = "glm",
+  family = binomial,
+  trControl = ctrlspecs,
+  metric = "Sens",  
+  maximize = TRUE   
+)
+# Valuation
+predictions <- predict(model2, newdata = test_df, type = "raw")
+confusionMatrix(predictions, test_df$CHD, positive = "Yes")  
+```
+
+# Selected model: Logistic Model 2 (oversampled)
+
+While the initial model demonstrated high overall **accuracy** (85.3%), its critical limitation was an extreme imbalance in class-specific performance: near-perfect **specificity** (99.7% for 'No') but negligible **sensitivity** (3.3% for 'Yes'). This renders it clinically inadequate for CHD prediction, as it fails to identify 96.7% of actual cases. The model's apparent discriminative capacity (**AUC** = 0.727) is misleading, as it stems entirely from correct classification of negative cases while failing to rank positive cases correctly . In contrast, the selected model (with up-sampling) achieves balanced **sensitivity** (68.6%) and **specificity** (67.9%) with comparable **AUC** (0.721), but crucially demonstrates actual ability to distinguish positive cases. The trade-off in nominal **accuracy** (68.0% vs 85.3%) is justified by the clinical priority of identifying at-risk patients.
+
+# K-nn
+
+The KNN model was trained on the same variables as the logistic regression, following standardization (mean=0, SD=1). The k parameter (number of neighbors) was optimized through 5-fold cross-validation by maximizing sensitivity. To address class imbalance, oversampling of the minority class ('Yes') was applied during training.
+
+```{r echo=FALSE}
+# 2. Configuration of cross validation with oversampling of Yes("up")
+ctrl_knn <- trainControl(
+  method = "cv",
+  number = 5,
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary,
+  sampling = "up",  # Oversampling diretto da caret
+  verboseIter = FALSE
+)
+
+```
+
+```{r}
+# 3.KNN training
+set.seed(123)
+model_knn <- train(
+  CHD ~ sex + age + smoker + cpd + stroke + HTN + diabetes + chol + DBP + BMI + HR,
+  data = train_df,
+  method = "knn",
+  trControl = ctrl_knn,
+  metric = "Sens",  
+  tuneLength = 10,
+  preProcess = c("center", "scale") 
+)
+# 4. Valuation
+knn_pred <- predict(model_knn, test_df)
+confusionMatrix(knn_pred, test_df$CHD, positive = "Yes")
+
+```
+
+The KNN model selected k=23 through systematic evaluation, as this neighborhood size optimally balanced detection capability (61.1% sensitivity) with specificity (63.3%) for reliable CHD screening. The 0.5 threshold maintained this equilibrium - sufficiently sensitive to identify true cases while avoiding excessive false positives that could overwhelm clinical workflows.
+
+# Conclusions and study limitations
+
+**1. Optimal Model Selection**\
+The [logistic regression]{.underline} demonstrates superior performance to KNN for CHD prediction, with clinically meaningful advantages:
+
+-   **Higher discriminative power**: AUC 0.721 vs KNN's AUC 0.664 (at k=23)
+
+-   **Better sensitivity-balanced accuracy tradeoff**:
+
+    -   Sensitivity: 68.6% (Logistic) vs 63.6% (KNN)
+
+    -   Balanced Accuracy: 68.3% (Logistic) vs 62.9% (KNN)
+
+-   **Stronger negative predictive value**: 92.5% (Logistic) vs 90.7% (KNN), critical for ruling out CHD
+
+*Clinical implication*: The logistic model identifies \~5% more true CHD cases while maintaining better specificity - a decisive advantage for preventive cardiology where false negatives carry high risks.
+
+**2. Key Limitations**\
+a) **Class imbalance**: Both models struggle with the low CHD prevalence (14.99%), despite upsampling. External validation in balanced cohorts is needed.
+
+b) **Modest positive predictive values**:
+
+-   Logistic: 27.4%
+
+-   KNN: 22.9%
+
+------------------------------------------------------------------------
+
+### **Statistical Summary Table**
+
+| **Metric**  | **Logistic Regression** | **KNN**         | **Clinical Preference** |
+|:------------|:------------------------|:----------------|:------------------------|
+| AUC         | 0.721                   | 0.664 (at k=23) | Logistic                |
+| Sensitivity | 68.6%                   | 63.6%           | Logistic                |
+| Specificity | 67.9%                   | 62.2%           | Comparable              |
+| NPV         | 92.5%                   | 90.7%           | Logistic                |
+| PPV         | 27.4%                   | 22.9%           | (Both inadequate)       |
