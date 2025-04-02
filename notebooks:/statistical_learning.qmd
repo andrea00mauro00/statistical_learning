@@ -1,7 +1,6 @@
 ---
-title: "Statistical Models Homework 1"
-date: "Submitted: 2 April 2025"
-author: "Andrea Mauro (Student ID: 254955)"
+title: "Statistical Learning Project"
+author: "Andrea Mauro"
 format:
   pdf:
     latex-engine: xelatex
